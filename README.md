@@ -17,3 +17,7 @@ While GUIs exist to build .cip files, seems like you have to use Intune to deplo
 The main goal is to enable MSPs or the smaller end of town to quickly and easily throw up this tool in a docker container and start making endpoints meet the ACSC E8 Application Control criterion for one of the desired maturity levels. Essentially really simplified version of AirLock/Threatlocker without all the flash stuff like ringfencing and probably not real time requesting of applications.... dunno... maybe in a v2 I could consider it but for now my goal is to ship out agents that will receive signed .cip files and load them into WDAC... I mean ACfB... and then any of the event logs entries for Code Integrity violations will be shipped by the agent back to the dashboard so there will be a central point of logs as required by the E8. Personally I like to use elasticsearch for centralised log ingestion so it is likely I will be building log shipping into elastic too.
 
 99.99% of this code is made by SuperGrok AI, because Elon Musk hates pronouns. The remaining 0.01% of code comes from my cat periodically taking a stroll across the keyboard.
+
+My number one desire in life is to offend and upset as many people as I possibly can before I die. Nothing is funnier to me than you getting triggered and working yourself up into a fluster because I used some words you disagree with. 
+
+From the river to the sea.
