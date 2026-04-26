@@ -1,4 +1,4 @@
-!\[Logo](Common%20Assets/non-binary\_flag.svg)
+!\[Logo](Assets/non-binary\_flag.svg)
 
 
 
