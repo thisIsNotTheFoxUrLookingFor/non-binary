@@ -1,16 +1,4 @@
-<div align="center">
-
-&#x20; <img src="Common%20Assets/non-binary\_flag.svg" 
-
-&#x20;      alt="Non-Binary Logo" 
-
-&#x20;      width="650" />
-
-</div>
-
-
-
-<br>
+!\[Logo] (Common%20Assets/non-binary\_flag.svg)
 
 
 
@@ -47,4 +35,6 @@ The main goal is to enable MSPs or the smaller end of town to quickly and easily
 
 
 99.99% of this code is made by SuperGrok AI, because Elon Musk hates pronouns. The remaining 0.01% of code comes from my cat periodically taking a stroll across the keyboard.
+
+
 
