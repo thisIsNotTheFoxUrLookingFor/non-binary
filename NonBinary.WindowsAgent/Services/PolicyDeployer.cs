@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.Management.Automation;
+using System.Diagnostics;
+using NonBinary.WindowsAgent.Models;   // for PolicyType enum
 
 namespace NonBinary.WindowsAgent.Services;
 
@@ -12,36 +13,64 @@ public class PolicyDeployer
         _logger = logger;
     }
 
-    public async Task<(bool Success, string Message)> DeployAsync(string xmlPath)
+    /// <summary>
+    /// Deploys a .cip file silently using PowerShell launcher (reliable on win-arm64).
+    /// </summary>
+    public async Task DeployPolicyAsync(string cipFilePath, PolicyType policyType = PolicyType.Base, CancellationToken cancellationToken = default)
     {
+        if (!File.Exists(cipFilePath))
+        {
+            _logger.LogError("CIP file not found: {Path}", cipFilePath);
+            return;
+        }
+
         try
         {
-            var cipPath = Path.ChangeExtension(xmlPath, ".cip");
+            _logger.LogInformation("Deploying {PolicyType} policy: {File}",
+                policyType, Path.GetFileName(cipFilePath));
 
-            _logger.LogInformation("Converting XML to CIP and deploying: {XmlPath}", xmlPath);
+            // Full path for ARM64
+            var ciToolPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System),
+                "CiTool.exe");
 
-            using var ps = PowerShell.Create();
+            _logger.LogInformation("CiTool path: {CiToolPath} (exists: {Exists})",
+                ciToolPath, File.Exists(ciToolPath));
 
-            // Convert XML → CIP
-            ps.AddCommand("ConvertFrom-CIPolicy")
-              .AddParameter("XmlFilePath", xmlPath)
-              .AddParameter("BinaryFilePath", cipPath);
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"& '{ciToolPath}' --update-policy '{cipFilePath}' --verbose\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
 
-            await Task.Run(() => ps.Invoke());
+            _logger.LogDebug("PowerShell command: {Arguments}", startInfo.Arguments);
 
-            // Deploy supplemental policy (rebootless)
-            ps.Commands.Clear();
-            ps.AddScript($"CiTool.exe --update-policy \"{cipPath}\" --verbose");
+            using var process = Process.Start(startInfo);
+            if (process == null)
+            {
+                _logger.LogError("Failed to start PowerShell process");
+                return;
+            }
 
-            var result = await Task.Run(() => ps.Invoke());
+            var timeout = TimeSpan.FromSeconds(60);
+            using var timeoutCts = new CancellationTokenSource(timeout);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
-            _logger.LogInformation("Policy deployed successfully");
-            return (true, $"Supplemental policy applied: {cipPath}");
+            await process.WaitForExitAsync(linkedCts.Token);
+
+            if (process.ExitCode == 0)
+                _logger.LogInformation("✅ {PolicyType} policy deployed successfully (Is Currently Enforced: true).", policyType);
+            else
+                _logger.LogError("CiTool failed with exit code {ExitCode}", process.ExitCode);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Policy deployment failed");
-            return (false, $"Deployment failed: {ex.Message}");
+            _logger.LogError(ex, "Failed to deploy {PolicyType} policy", policyType);
         }
     }
 }

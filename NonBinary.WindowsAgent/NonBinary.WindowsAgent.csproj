@@ -2,13 +2,25 @@
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net10.0-windows</TargetFramework>
-		<ImplicitUsings>enable</ImplicitUsings>
+		<RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
 		<Nullable>enable</Nullable>
-		<RuntimeIdentifier>win-arm64</RuntimeIdentifier>
-		<PublishSingleFile>true</PublishSingleFile>
+		<ImplicitUsings>enable</ImplicitUsings>
 		<SelfContained>true</SelfContained>
+		<PublishSingleFile>true</PublishSingleFile>
 		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<PlatformTarget>AnyCPU</PlatformTarget>
+		<Platforms>AnyCPU</Platforms>
+		<AssemblyTitle>$(MSBuildProjectName)</AssemblyTitle>
+		<ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+		<SignAssembly>False</SignAssembly>
+		<PackageLicenseFile>LICENSE</PackageLicenseFile>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+	  <DebugType>embedded</DebugType>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+	  <DebugType>embedded</DebugType>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -24,8 +36,25 @@
 		</Content>
 	</ItemGroup>
 	<ItemGroup>
-	  <None Update="Assets\BasePolicySetup.ps1">
-	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	  </None>
+		<None Include="..\LICENSE">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
 	</ItemGroup>
+	<Target Name="SignAfterPublish" AfterTargets="Publish" Condition="'$(PfxPassword)' != ''">
+		<PropertyGroup>
+			<!-- Path to your certificate -->
+			<PfxPath>$(MSBuildProjectDirectory)\..\..\..\codesign\NonBinaryCodeSigning.pfx</PfxPath>
+			<ExeToSign>$(PublishDir)NonBinary.WindowsAgent.exe</ExeToSign>
+
+			<!-- Full path to signtool.exe (ARM64 version) -->
+			<SigntoolPath>C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\arm64\signtool.exe</SigntoolPath>
+		</PropertyGroup>
+
+		<!-- Error if signtool.exe is missing -->
+		<Error Condition="!Exists('$(SigntoolPath)')" Text="❌ signtool.exe not found at $(SigntoolPath). Please install Windows SDK Signing Tools." />
+
+		<!-- Sign the executable -->
+		<Exec Command="&quot;$(SigntoolPath)&quot; sign /fd SHA256 /f &quot;$(PfxPath)&quot; /p &quot;$(PfxPassword)&quot; /t http://timestamp.digicert.com &quot;$(ExeToSign)&quot;" />
+	</Target>
 </Project>

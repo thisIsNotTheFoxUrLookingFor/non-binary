@@ -1,90 +1,120 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using NonBinary.WindowsAgent.Services;
 using NonBinary.WindowsAgent.Models;
-using System.Net.Http.Json;
-using System.Text.Json;
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace NonBinary.WindowsAgent.Services;
 
 public class PolicyPoller : IHostedService, IDisposable
 {
     private readonly ILogger<PolicyPoller> _logger;
-    private readonly PolicyService? _policyService;
     private readonly IConfiguration _config;
-    private readonly HttpClient? _httpClient;
-    private Timer? _timer;
+    private readonly PolicyDeployer _policyDeployer;
+    private CancellationTokenSource? _cts;
+    private bool _disposed;
 
-    public PolicyPoller(ILogger<PolicyPoller> logger, PolicyService policyService, IConfiguration config)
+    public PolicyPoller(
+        ILogger<PolicyPoller> logger,
+        IConfiguration config,
+        PolicyDeployer policyDeployer)
     {
         _logger = logger;
-        _policyService = policyService;
         _config = config;
+        _policyDeployer = policyDeployer;
+    }
 
-        var host = config["Dashboard:Host"];
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var policyDir = Path.Combine(baseDir, "Policy");
+        var assetsDir = Path.Combine(baseDir, "Assets");
+
+        // 1. Create Policy folder if missing
+        if (!Directory.Exists(policyDir))
+        {
+            Directory.CreateDirectory(policyDir);
+            _logger.LogInformation("Created Policy folder at {Path}", policyDir);
+        }
+
+        // 2. Bootstrap from Assets/BasePolicy.cip if present
+        var assetPath = Path.Combine(assetsDir, "BasePolicy.cip");
+        var localPolicyPath = Path.Combine(policyDir, "BasePolicy.cip");
+
+        if (File.Exists(assetPath))
+        {
+            try
+            {
+                File.Copy(assetPath, localPolicyPath, overwrite: true);
+                _logger.LogInformation("Copied BasePolicy.cip from Assets to Policy folder");
+
+                await _policyDeployer.DeployPolicyAsync(localPolicyPath, PolicyType.Base);
+                _logger.LogInformation("✅ BasePolicy.cip successfully deployed as WDAC allow-list");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to copy or deploy BasePolicy.cip from Assets");
+            }
+        }
+        else
+        {
+            _logger.LogWarning("No BasePolicy.cip found in Assets folder – local bootstrap skipped");
+        }
+
+        // Start cancellable polling loop (Ctrl+C now works cleanly)
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _ = RunPollingLoopAsync(_cts.Token);   // background loop
+
+        var host = _config["Dashboard:Host"];
+        var interval = _config.GetValue<int>("Dashboard:PollIntervalSeconds", 3);
+
         if (string.IsNullOrEmpty(host))
         {
-            _logger.LogWarning("Dashboard:Host not configured in appsettings.json — polling disabled for now.");
-            return; // don't start polling
+            _logger.LogInformation("Dashboard:Host not configured – running in local-only mode");
         }
-
-        var port = config.GetValue<int>("Dashboard:Port", 443);
-        var useHttps = config.GetValue<bool>("Dashboard:UseHttps", true);
-
-        var scheme = useHttps ? "https" : "http";
-        var baseUrl = port == 443 && useHttps || port == 80 && !useHttps
-            ? $"{scheme}://{host}"
-            : $"{scheme}://{host}:{port}";
-
-        _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        else
+        {
+            _logger.LogInformation("PolicyPoller started – will check dashboard every {Seconds} seconds", interval);
+        }
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    private async Task RunPollingLoopAsync(CancellationToken token)
     {
-        if (_httpClient == null)
-            return Task.CompletedTask; // polling disabled
+        var interval = _config.GetValue<int>("Dashboard:PollIntervalSeconds", 3);
 
-        var intervalSeconds = _config.GetValue<int>("Dashboard:PollIntervalSeconds", 300);
-        _logger.LogInformation("PolicyPoller started — checking dashboard every {Seconds}s", intervalSeconds);
-
-        _timer = new Timer(DoPoll, null, TimeSpan.Zero, TimeSpan.FromSeconds(intervalSeconds));
-        return Task.CompletedTask;
+        while (!token.IsCancellationRequested)
+        {
+            await DoPollAsync(token);
+            if (!token.IsCancellationRequested)
+                await Task.Delay(TimeSpan.FromSeconds(interval), token);
+        }
     }
 
-    private async void DoPoll(object? state)
+    private async Task DoPollAsync(CancellationToken token)
     {
-        try
-        {
-            _logger.LogInformation("Checking in with dashboard...");
-
-            _httpClient!.DefaultRequestHeaders.Clear();
-            var apiKey = _config["Dashboard:ApiKey"];
-            if (!string.IsNullOrEmpty(apiKey))
-                _httpClient.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
-
-            var policy = await _httpClient.GetFromJsonAsync<RemotePolicy>("api/policy",
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            if (policy == null)
-            {
-                _logger.LogWarning("No policy returned from dashboard");
-                return;
-            }
-
-            var result = await _policyService!.ApplyPolicyAsync(policy);
-            _logger.LogInformation("Policy check-in result: {Success} — {Message}", result.Success, result.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to poll dashboard");
-        }
+        // TODO: Future V1+ polling logic (when dashboard REST API is ready)
+        // 1. Download .cip into ./Policy
+        // 2. Call _policyDeployer.DeployPolicyAsync(...)
+        _logger.LogDebug("PolicyPoller tick – dashboard polling not yet implemented in V1");
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _timer?.Change(Timeout.Infinite, 0);
+        Dispose();
         return Task.CompletedTask;
     }
 
-    public void Dispose() => _timer?.Dispose();
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+    }
 }
